@@ -6,8 +6,8 @@ interface RemindersViewProps {
   goals: Goal[];
   email: string;
   setEmail: (e: string) => void;
-  getReminder: (goalId: number) => ReminderTime;
-  setReminder: (goalId: number, time: ReminderTime) => void;
+  getReminder: (goalId: string) => ReminderTime;
+  setReminder: (goalId: string, time: ReminderTime) => void;
 }
 
 export function RemindersView({ goals, email, setEmail, getReminder, setReminder }: RemindersViewProps) {

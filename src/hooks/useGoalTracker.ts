@@ -1,20 +1,42 @@
 import { useState, useCallback, useEffect } from "react";
+import { supabase } from "@/lib/supabase";
 import type { Goal, GoalFrequency, GoalType, GoalReminder, ReminderTime } from "@/types/goal";
 
 const ENABLE_REMINDERS = false;
 
-const STORAGE_KEY = "goal-tracker";
+interface GoalRow {
+  id: string;
+  user_id: string;
+  title: string;
+  frequency: GoalFrequency;
+  type: GoalType;
+  target: number | null;
+  label: string | null;
+  streak: number;
+  created_at: string;
+}
+
+interface GoalProgressRow {
+  goal_id: string;
+  user_id: string;
+  binary_done: boolean;
+  count_value: number;
+  history: number[];
+  last_reset_date: string;
+  last_week_reset_date: string;
+  last_month_reset_date: string;
+}
 
 interface StoredState {
   goals: Goal[];
-  binary: Record<number, boolean>;
-  counts: Record<number, number>;
-  history: Record<number, number[]>;
+  binary: Record<string, boolean>;
+  counts: Record<string, number>;
+  history: Record<string, number[]>;
   reminders: GoalReminder[];
   email: string;
-  lastResetDate: string;
-  lastWeekResetDate: string;
-  lastMonthResetDate: string;
+  lastResetDateByGoal: Record<string, string>;
+  lastWeekResetDateByGoal: Record<string, string>;
+  lastMonthResetDateByGoal: Record<string, string>;
 }
 
 function getToday() {
@@ -35,122 +57,168 @@ function getMonthId(date: Date) {
 
 function getDayOfWeekIndex() {
   const day = new Date().getDay();
-  return day === 0 ? 6 : day - 1; // Mon=0, Sun=6
+  return day === 0 ? 6 : day - 1;
 }
 
-const DEFAULT_GOALS: Goal[] = [
-  { id: 1, title: "Morning meditation", frequency: "daily", type: "binary", streak: 12, createdAt: getToday() },
-  { id: 2, title: "Read 20 pages", frequency: "daily", type: "binary", streak: 4, createdAt: getToday() },
-  { id: 3, title: "Meal prep", frequency: "weekly", type: "count", target: 3, streak: 6, label: "meals", createdAt: getToday() },
-  { id: 4, title: "Deep work session", frequency: "daily", type: "binary", streak: 8, createdAt: getToday() },
-  { id: 5, title: "Weekly review", frequency: "weekly", type: "binary", streak: 6, createdAt: getToday() },
-  { id: 6, title: "Monthly planning", frequency: "monthly", type: "binary", streak: 3, createdAt: getToday() },
-];
-
-const DEFAULT_HISTORY: Record<number, number[]> = {
-  1: [1, 1, 1, 1, 1, 0, 1],
-  2: [1, 0, 1, 1, 0, 0, 1],
-  3: [0, 1, 0, 1, 0, 0, 0],
-  4: [1, 1, 0, 1, 1, 0, 0],
-  5: [0, 0, 0, 0, 1, 0, 0],
-  6: [0, 0, 0, 0, 0, 0, 0],
+const EMPTY_STATE: StoredState = {
+  goals: [],
+  binary: {},
+  counts: {},
+  history: {},
+  reminders: [],
+  email: "",
+  lastResetDateByGoal: {},
+  lastWeekResetDateByGoal: {},
+  lastMonthResetDateByGoal: {},
 };
 
-function loadState(): StoredState {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {}
+function toGoal(row: GoalRow): Goal {
   return {
-    goals: DEFAULT_GOALS,
-    binary: { 1: false, 2: true, 4: true, 5: false, 6: false },
-    counts: { 3: 1 },
-    history: DEFAULT_HISTORY,
-    reminders: [],
-    email: "",
-    lastResetDate: getToday(),
-    lastWeekResetDate: getWeekId(new Date()),
-    lastMonthResetDate: getMonthId(new Date()),
+    id: row.id,
+    title: row.title,
+    frequency: row.frequency,
+    type: row.type,
+    target: row.target ?? undefined,
+    label: row.label ?? undefined,
+    streak: row.streak,
+    createdAt: row.created_at,
   };
 }
 
-export function useGoalTracker() {
-  const [state, setState] = useState<StoredState>(loadState);
+export function useGoalTracker(userId?: string) {
+  const [state, setState] = useState<StoredState>(EMPTY_STATE);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Persist
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [state]);
+  const loadFromSupabase = useCallback(async () => {
+    if (!userId) {
+      setState(EMPTY_STATE);
+      setIsLoading(false);
+      return;
+    }
 
-  // Period rollover check
+    setIsLoading(true);
+    const [{ data: goalsData, error: goalsError }, { data: progressData, error: progressError }] = await Promise.all([
+      supabase.from("goals").select("*").eq("user_id", userId).order("created_at", { ascending: true }),
+      supabase.from("goal_progress").select("*").eq("user_id", userId),
+    ]);
+
+    if (goalsError || progressError) {
+      console.error("Failed to load goals", goalsError ?? progressError);
+      setIsLoading(false);
+      return;
+    }
+
+    const binary: Record<string, boolean> = {};
+    const counts: Record<string, number> = {};
+    const history: Record<string, number[]> = {};
+    const lastResetDateByGoal: Record<string, string> = {};
+    const lastWeekResetDateByGoal: Record<string, string> = {};
+    const lastMonthResetDateByGoal: Record<string, string> = {};
+
+    (progressData as GoalProgressRow[]).forEach((row) => {
+      binary[row.goal_id] = row.binary_done;
+      counts[row.goal_id] = row.count_value;
+      history[row.goal_id] = row.history ?? new Array(7).fill(0);
+      lastResetDateByGoal[row.goal_id] = row.last_reset_date;
+      lastWeekResetDateByGoal[row.goal_id] = row.last_week_reset_date;
+      lastMonthResetDateByGoal[row.goal_id] = row.last_month_reset_date;
+    });
+
+    setState({
+      goals: (goalsData as GoalRow[]).map(toGoal),
+      binary,
+      counts,
+      history,
+      reminders: [],
+      email: "",
+      lastResetDateByGoal,
+      lastWeekResetDateByGoal,
+      lastMonthResetDateByGoal,
+    });
+    setIsLoading(false);
+  }, [userId]);
+
   useEffect(() => {
+    loadFromSupabase();
+  }, [loadFromSupabase]);
+
+  useEffect(() => {
+    if (!userId || state.goals.length === 0) return;
+
     const today = getToday();
     const currentWeek = getWeekId(new Date());
     const currentMonth = getMonthId(new Date());
 
-    setState(prev => {
-      let updated = { ...prev };
-      let needsUpdate = false;
+    setState((prev) => {
+      const next = { ...prev };
+      const updates: GoalProgressRow[] = [];
 
-      // Daily reset
-      if (prev.lastResetDate !== today) {
-        const dailyGoals = prev.goals.filter(g => g.frequency === "daily");
-        const newBinary = { ...prev.binary };
-        const newHistory = { ...prev.history };
+      for (const g of prev.goals) {
+        const goalId = g.id;
+        let binaryDone = prev.binary[goalId] ?? false;
+        let countValue = prev.counts[goalId] ?? 0;
+        let hist = [...(prev.history[goalId] || new Array(7).fill(0))];
+        let lastResetDate = prev.lastResetDateByGoal[goalId] ?? today;
+        let lastWeekResetDate = prev.lastWeekResetDateByGoal[goalId] ?? currentWeek;
+        let lastMonthResetDate = prev.lastMonthResetDateByGoal[goalId] ?? currentMonth;
+        let changed = false;
 
-        dailyGoals.forEach(g => {
+        if (lastResetDate !== today && g.frequency === "daily") {
           if (g.type === "binary") {
-            // Save yesterday's status to history
-            const hist = [...(newHistory[g.id] || new Array(7).fill(0))];
             const yesterdayIdx = (getDayOfWeekIndex() - 1 + 7) % 7;
-            hist[yesterdayIdx] = newBinary[g.id] ? 1 : 0;
-            newHistory[g.id] = hist;
-            newBinary[g.id] = false;
+            hist[yesterdayIdx] = binaryDone ? 1 : 0;
+            binaryDone = false;
           }
-        });
+          if (g.type === "count") countValue = 0;
+          lastResetDate = today;
+          changed = true;
+        }
 
-        updated = { ...updated, binary: newBinary, history: newHistory, lastResetDate: today };
-        needsUpdate = true;
+        if (lastWeekResetDate !== currentWeek && g.frequency === "weekly") {
+          if (g.type === "binary") binaryDone = false;
+          if (g.type === "count") countValue = 0;
+          hist = new Array(7).fill(0);
+          lastWeekResetDate = currentWeek;
+          changed = true;
+        }
+
+        if (lastMonthResetDate !== currentMonth && g.frequency === "monthly") {
+          if (g.type === "binary") binaryDone = false;
+          if (g.type === "count") countValue = 0;
+          lastMonthResetDate = currentMonth;
+          changed = true;
+        }
+
+        if (changed) {
+          next.binary = { ...next.binary, [goalId]: binaryDone };
+          next.counts = { ...next.counts, [goalId]: countValue };
+          next.history = { ...next.history, [goalId]: hist };
+          next.lastResetDateByGoal = { ...next.lastResetDateByGoal, [goalId]: lastResetDate };
+          next.lastWeekResetDateByGoal = { ...next.lastWeekResetDateByGoal, [goalId]: lastWeekResetDate };
+          next.lastMonthResetDateByGoal = { ...next.lastMonthResetDateByGoal, [goalId]: lastMonthResetDate };
+
+          updates.push({
+            goal_id: goalId,
+            user_id: userId,
+            binary_done: binaryDone,
+            count_value: countValue,
+            history: hist,
+            last_reset_date: lastResetDate,
+            last_week_reset_date: lastWeekResetDate,
+            last_month_reset_date: lastMonthResetDate,
+          });
+        }
       }
 
-      // Weekly reset
-      if (prev.lastWeekResetDate !== currentWeek) {
-        const weeklyGoals = prev.goals.filter(g => g.frequency === "weekly");
-        const newBinary = { ...updated.binary };
-        const newCounts = { ...updated.counts };
-        const newHistory = { ...updated.history };
-
-        weeklyGoals.forEach(g => {
-          if (g.type === "binary") newBinary[g.id] = false;
-          if (g.type === "count") newCounts[g.id] = 0;
-          newHistory[g.id] = new Array(7).fill(0);
+      if (updates.length > 0) {
+        supabase.from("goal_progress").upsert(updates).then(({ error }) => {
+          if (error) console.error("Failed to persist reset updates", error);
         });
-
-        // Also reset daily histories for new week
-        prev.goals.filter(g => g.frequency === "daily").forEach(g => {
-          newHistory[g.id] = new Array(7).fill(0);
-        });
-
-        updated = { ...updated, binary: newBinary, counts: newCounts, history: newHistory, lastWeekResetDate: currentWeek };
-        needsUpdate = true;
       }
 
-      // Monthly reset
-      if (prev.lastMonthResetDate !== currentMonth) {
-        const monthlyGoals = prev.goals.filter(g => g.frequency === "monthly");
-        const newBinary = { ...updated.binary };
-
-        monthlyGoals.forEach(g => {
-          if (g.type === "binary") newBinary[g.id] = false;
-        });
-
-        updated = { ...updated, binary: newBinary, lastMonthResetDate: currentMonth };
-        needsUpdate = true;
-      }
-
-      return needsUpdate ? updated : prev;
+      return updates.length > 0 ? next : prev;
     });
-  }, []);
+  }, [state.goals, userId]);
 
   const goals = state.goals;
   const binary = state.binary;
@@ -165,66 +233,153 @@ export function useGoalTracker() {
     return false;
   }, [binary, counts]);
 
-  const toggleBinary = useCallback((id: number) => {
-    setState(p => ({ ...p, binary: { ...p.binary, [id]: !p.binary[id] } }));
-  }, []);
+  const persistProgress = useCallback(async (goalId: string, nextBinary: boolean, nextCount: number, nextHistory: number[]) => {
+    if (!userId) return;
+    const payload: GoalProgressRow = {
+      goal_id: goalId,
+      user_id: userId,
+      binary_done: nextBinary,
+      count_value: nextCount,
+      history: nextHistory,
+      last_reset_date: state.lastResetDateByGoal[goalId] ?? getToday(),
+      last_week_reset_date: state.lastWeekResetDateByGoal[goalId] ?? getWeekId(new Date()),
+      last_month_reset_date: state.lastMonthResetDateByGoal[goalId] ?? getMonthId(new Date()),
+    };
+    const { error } = await supabase.from("goal_progress").upsert(payload);
+    if (error) console.error("Failed to sync goal progress", error);
+  }, [state.lastMonthResetDateByGoal, state.lastResetDateByGoal, state.lastWeekResetDateByGoal, userId]);
 
-  const increment = useCallback((id: number, target: number) => {
-    setState(p => ({ ...p, counts: { ...p.counts, [id]: Math.min((p.counts[id] ?? 0) + 1, target) } }));
-  }, []);
+  const toggleBinary = useCallback((id: string) => {
+    const nextValue = !binary[id];
+    setState((p) => ({ ...p, binary: { ...p.binary, [id]: nextValue } }));
+    void persistProgress(id, nextValue, counts[id] ?? 0, history[id] ?? new Array(7).fill(0));
+  }, [binary, counts, history, persistProgress]);
 
-  const decrement = useCallback((id: number) => {
-    setState(p => ({ ...p, counts: { ...p.counts, [id]: Math.max((p.counts[id] ?? 0) - 1, 0) } }));
-  }, []);
+  const increment = useCallback((id: string, target: number) => {
+    const nextCount = Math.min((counts[id] ?? 0) + 1, target);
+    setState((p) => ({ ...p, counts: { ...p.counts, [id]: nextCount } }));
+    void persistProgress(id, binary[id] ?? false, nextCount, history[id] ?? new Array(7).fill(0));
+  }, [binary, counts, history, persistProgress]);
 
-  const addGoal = useCallback((title: string, frequency: GoalFrequency, type: GoalType, target?: number, label?: string) => {
-    const id = Date.now();
-    setState(p => ({
+  const decrement = useCallback((id: string) => {
+    const nextCount = Math.max((counts[id] ?? 0) - 1, 0);
+    setState((p) => ({ ...p, counts: { ...p.counts, [id]: nextCount } }));
+    void persistProgress(id, binary[id] ?? false, nextCount, history[id] ?? new Array(7).fill(0));
+  }, [binary, counts, history, persistProgress]);
+
+  const addGoal = useCallback(async (title: string, frequency: GoalFrequency, type: GoalType, target?: number, label?: string) => {
+    if (!userId) return;
+
+    const tempId = `tmp-${Date.now()}`;
+    const today = getToday();
+    const week = getWeekId(new Date());
+    const month = getMonthId(new Date());
+
+    setState((p) => ({
       ...p,
-      goals: [...p.goals, { id, title, frequency, type, target, label, streak: 0, createdAt: getToday() }],
-      ...(type === "count" ? { counts: { ...p.counts, [id]: 0 } } : {}),
-      history: { ...p.history, [id]: new Array(7).fill(0) },
+      goals: [...p.goals, { id: tempId, title, frequency, type, target, label, streak: 0, createdAt: new Date().toISOString() }],
+      binary: { ...p.binary, [tempId]: false },
+      counts: { ...p.counts, [tempId]: 0 },
+      history: { ...p.history, [tempId]: new Array(7).fill(0) },
+      lastResetDateByGoal: { ...p.lastResetDateByGoal, [tempId]: today },
+      lastWeekResetDateByGoal: { ...p.lastWeekResetDateByGoal, [tempId]: week },
+      lastMonthResetDateByGoal: { ...p.lastMonthResetDateByGoal, [tempId]: month },
     }));
-  }, []);
 
-  const deleteGoal = useCallback((id: number) => {
-    setState(p => {
-      const newGoals = p.goals.filter(g => g.id !== id);
+    const { data, error } = await supabase.from("goals").insert({
+      user_id: userId,
+      title,
+      frequency,
+      type,
+      target: target ?? null,
+      label: label ?? null,
+      streak: 0,
+    }).select("id, created_at").single();
+
+    if (error || !data) {
+      console.error("Failed to add goal", error);
+      setState((p) => ({ ...p, goals: p.goals.filter((g) => g.id !== tempId) }));
+      return;
+    }
+
+    const realId = data.id as string;
+    await supabase.from("goal_progress").insert({
+      goal_id: realId,
+      user_id: userId,
+      binary_done: false,
+      count_value: 0,
+      history: new Array(7).fill(0),
+      last_reset_date: today,
+      last_week_reset_date: week,
+      last_month_reset_date: month,
+    });
+
+    setState((p) => {
+      const goals = p.goals.map((g) => g.id === tempId ? { ...g, id: realId, createdAt: data.created_at as string } : g);
+      const { [tempId]: tempBinary, ...restBinary } = p.binary;
+      const { [tempId]: tempCount, ...restCounts } = p.counts;
+      const { [tempId]: tempHistory, ...restHistory } = p.history;
+      const { [tempId]: tempDaily, ...restDaily } = p.lastResetDateByGoal;
+      const { [tempId]: tempWeekly, ...restWeekly } = p.lastWeekResetDateByGoal;
+      const { [tempId]: tempMonthly, ...restMonthly } = p.lastMonthResetDateByGoal;
+      return {
+        ...p,
+        goals,
+        binary: { ...restBinary, [realId]: tempBinary ?? false },
+        counts: { ...restCounts, [realId]: tempCount ?? 0 },
+        history: { ...restHistory, [realId]: tempHistory ?? new Array(7).fill(0) },
+        lastResetDateByGoal: { ...restDaily, [realId]: tempDaily ?? today },
+        lastWeekResetDateByGoal: { ...restWeekly, [realId]: tempWeekly ?? week },
+        lastMonthResetDateByGoal: { ...restMonthly, [realId]: tempMonthly ?? month },
+      };
+    });
+  }, [userId]);
+
+  const deleteGoal = useCallback(async (id: string) => {
+    const snapshot = state;
+    setState((p) => {
+      const newGoals = p.goals.filter((g) => g.id !== id);
       const newBinary = { ...p.binary };
       const newCounts = { ...p.counts };
       const newHistory = { ...p.history };
-      const newReminders = ENABLE_REMINDERS ? p.reminders.filter(r => r.goalId !== id) : p.reminders;
+      const newReminders = ENABLE_REMINDERS ? p.reminders.filter((r) => r.goalId !== id) : p.reminders;
       delete newBinary[id];
       delete newCounts[id];
       delete newHistory[id];
       return { ...p, goals: newGoals, binary: newBinary, counts: newCounts, history: newHistory, reminders: newReminders };
     });
-  }, []);
+
+    const { error } = await supabase.from("goals").delete().eq("id", id);
+    if (error) {
+      console.error("Failed to delete goal", error);
+      setState(snapshot);
+    }
+  }, [state]);
 
   const setEmail = useCallback((nextEmail: string) => {
     if (!ENABLE_REMINDERS) return;
-    setState(p => ({ ...p, email: nextEmail }));
+    setState((p) => ({ ...p, email: nextEmail }));
   }, []);
 
-  const setReminder = useCallback((goalId: number, time: ReminderTime) => {
+  const setReminder = useCallback((goalId: string, time: ReminderTime) => {
     if (!ENABLE_REMINDERS) return;
-    setState(p => {
-      const filtered = p.reminders.filter(r => r.goalId !== goalId);
+    setState((p) => {
+      const filtered = p.reminders.filter((r) => r.goalId !== goalId);
       if (time === "none") return { ...p, reminders: filtered };
       return { ...p, reminders: [...filtered, { goalId, time }] };
     });
   }, []);
 
-  const getReminder = useCallback((goalId: number): ReminderTime => {
+  const getReminder = useCallback((goalId: string): ReminderTime => {
     if (!ENABLE_REMINDERS) return "none";
-    return reminders.find(r => r.goalId === goalId)?.time ?? "none";
+    return reminders.find((r) => r.goalId === goalId)?.time ?? "none";
   }, [reminders]);
 
   const completedCount = goals.filter(isComplete).length;
   const todayIndex = getDayOfWeekIndex();
 
   return {
-    goals, binary, counts, history, email, completedCount,
+    goals, binary, counts, history, email, completedCount, isLoading,
     todayIndex, isComplete, toggleBinary, increment, decrement,
     addGoal, deleteGoal, setEmail, setReminder, getReminder, reminderEnabled: ENABLE_REMINDERS,
   };

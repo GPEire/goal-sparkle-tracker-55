@@ -5,10 +5,10 @@ import { CheckCircle } from "./CheckCircle";
 interface TodayViewProps {
   goals: Goal[];
   isComplete: (g: Goal) => boolean;
-  counts: Record<number, number>;
-  toggleBinary: (id: number) => void;
-  increment: (id: number, target: number) => void;
-  decrement: (id: number) => void;
+  counts: Record<string, number>;
+  toggleBinary: (id: string) => void;
+  increment: (id: string, target: number) => void;
+  decrement: (id: string) => void;
 }
 
 export function TodayView({
