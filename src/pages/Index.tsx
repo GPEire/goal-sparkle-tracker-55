@@ -85,7 +85,9 @@ const Index = () => {
             history={tracker.history}
             counts={tracker.counts}
             todayIndex={tracker.todayIndex}
-            completedCount={tracker.completedCount}
+            dailyPercent={tracker.dailyPercent}
+            weeklyPercent={tracker.weeklyPercent}
+            monthlyPercent={tracker.monthlyPercent}
           />
         )}
 

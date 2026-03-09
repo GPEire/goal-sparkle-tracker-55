@@ -6,12 +6,12 @@ interface ProgressViewProps {
   history: Record<number, number[]>;
   counts: Record<number, number>;
   todayIndex: number;
-  completedCount: number;
+  dailyPercent: number;
+  weeklyPercent: number;
+  monthlyPercent: number;
 }
 
-export function ProgressView({ goals, history, counts, todayIndex, completedCount }: ProgressViewProps) {
-  const totalGoals = goals.length;
-  const weekPercent = totalGoals > 0 ? Math.round((completedCount / totalGoals) * 100) : 0;
+export function ProgressView({ goals, history, counts, todayIndex, dailyPercent, weeklyPercent, monthlyPercent }: ProgressViewProps) {
   const bestStreak = goals.reduce((max, g) => Math.max(max, g.streak), 0);
 
   // Find first count goal for summary
@@ -19,8 +19,9 @@ export function ProgressView({ goals, history, counts, todayIndex, completedCoun
 
   const stats = [
     { label: "Best streak", value: `${bestStreak}d` },
-    { label: "This week", value: `${weekPercent}%` },
-    { label: "This month", value: `${Math.round(weekPercent * 0.93)}%` },
+    { label: "Today", value: `${dailyPercent}%` },
+    { label: "This week", value: `${weeklyPercent}%` },
+    { label: "This month", value: `${monthlyPercent}%` },
   ];
 
   return (
@@ -97,7 +98,7 @@ export function ProgressView({ goals, history, counts, todayIndex, completedCoun
       )}
 
       {/* Stats */}
-      <div className="mt-7 grid grid-cols-3">
+      <div className="mt-7 grid grid-cols-4">
         {stats.map(s => (
           <div key={s.label} className="py-4 border-t border-border">
             <div className="text-xl font-display text-foreground mb-1">{s.value}</div>

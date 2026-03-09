@@ -1,41 +1,31 @@
 import { useState, useCallback, useEffect } from "react";
-import type { Goal, GoalFrequency, GoalType, GoalReminder, ReminderTime } from "@/types/goal";
-
-const ENABLE_REMINDERS = false;
+import type {
+  Goal,
+  GoalFrequency,
+  GoalType,
+  GoalEvent,
+  GoalEventType,
+  GoalProgressRow,
+} from "@/types/goal";
+import {
+  derivePeriodCompletionRate,
+  deriveWeeklyHistory,
+  getDayOfWeekIndex,
+  getToday,
+  rebuildGoalProgress,
+} from "@/lib/progressAnalytics";
 
 const STORAGE_KEY = "goal-tracker";
 
 interface StoredState {
   goals: Goal[];
-  binary: Record<number, boolean>;
-  counts: Record<number, number>;
-  history: Record<number, number[]>;
-  reminders: GoalReminder[];
-  email: string;
-  lastResetDate: string;
-  lastWeekResetDate: string;
-  lastMonthResetDate: string;
+  events: GoalEvent[];
+  goal_progress: Record<number, GoalProgressRow>;
 }
 
-function getToday() {
-  return new Date().toISOString().split("T")[0];
-}
-
-function getWeekId(date: Date) {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
-  const week1 = new Date(d.getFullYear(), 0, 4);
-  return `${d.getFullYear()}-W${Math.ceil(((d.getTime() - week1.getTime()) / 86400000 + week1.getDay() + 1) / 7)}`;
-}
-
-function getMonthId(date: Date) {
-  return `${date.getFullYear()}-${date.getMonth()}`;
-}
-
-function getDayOfWeekIndex() {
-  const day = new Date().getDay();
-  return day === 0 ? 6 : day - 1; // Mon=0, Sun=6
+interface LegacyStoredState extends Partial<StoredState> {
+  binary?: Record<number, boolean>;
+  counts?: Record<number, number>;
 }
 
 const DEFAULT_GOALS: Goal[] = [
@@ -47,117 +37,90 @@ const DEFAULT_GOALS: Goal[] = [
   { id: 6, title: "Monthly planning", frequency: "monthly", type: "binary", streak: 3, createdAt: getToday() },
 ];
 
-const DEFAULT_HISTORY: Record<number, number[]> = {
-  1: [1, 1, 1, 1, 1, 0, 1],
-  2: [1, 0, 1, 1, 0, 0, 1],
-  3: [0, 1, 0, 1, 0, 0, 0],
-  4: [1, 1, 0, 1, 1, 0, 0],
-  5: [0, 0, 0, 0, 1, 0, 0],
-  6: [0, 0, 0, 0, 0, 0, 0],
-};
-
 function loadState(): StoredState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {}
+    if (raw) {
+      const parsed = JSON.parse(raw) as LegacyStoredState;
+      if (parsed.goals) {
+        const events = parsed.events ?? [];
+        const goalProgress = Object.keys(parsed.goal_progress ?? {}).length
+          ? (parsed.goal_progress as Record<number, GoalProgressRow>)
+          : Object.fromEntries(
+              parsed.goals.map((goal) => [
+                goal.id,
+                {
+                  id: goal.id,
+                  user_id: "local-user",
+                  goal_id: goal.id,
+                  binary_value: parsed.binary?.[goal.id] ?? false,
+                  count_value: parsed.counts?.[goal.id] ?? 0,
+                  updated_at: new Date().toISOString(),
+                },
+              ]),
+            ) as Record<number, GoalProgressRow>;
+
+        return {
+          goals: parsed.goals,
+          events,
+          goal_progress: goalProgress,
+        };
+      }
+    }
+  } catch {
+    // no-op
+  }
+
   return {
     goals: DEFAULT_GOALS,
-    binary: { 1: false, 2: true, 4: true, 5: false, 6: false },
-    counts: { 3: 1 },
-    history: DEFAULT_HISTORY,
-    reminders: [],
-    email: "",
-    lastResetDate: getToday(),
-    lastWeekResetDate: getWeekId(new Date()),
-    lastMonthResetDate: getMonthId(new Date()),
+    events: [],
+    goal_progress: {},
   };
 }
 
 export function useGoalTracker() {
   const [state, setState] = useState<StoredState>(loadState);
 
-  // Persist
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state]);
 
-  // Period rollover check
-  useEffect(() => {
-    const today = getToday();
-    const currentWeek = getWeekId(new Date());
-    const currentMonth = getMonthId(new Date());
+  const goals = state.goals;
+  const events = state.events;
+  const history = deriveWeeklyHistory(goals, events);
+  const todayIndex = getDayOfWeekIndex();
 
-    setState(prev => {
-      let updated = { ...prev };
-      let needsUpdate = false;
+  const goalProgress = Object.keys(state.goal_progress).length
+    ? state.goal_progress
+    : rebuildGoalProgress(goals, events);
 
-      // Daily reset
-      if (prev.lastResetDate !== today) {
-        const dailyGoals = prev.goals.filter(g => g.frequency === "daily");
-        const newBinary = { ...prev.binary };
-        const newHistory = { ...prev.history };
+  const binary = Object.fromEntries(
+    Object.values(goalProgress).map((row) => [row.goal_id, row.binary_value]),
+  ) as Record<number, boolean>;
 
-        dailyGoals.forEach(g => {
-          if (g.type === "binary") {
-            // Save yesterday's status to history
-            const hist = [...(newHistory[g.id] || new Array(7).fill(0))];
-            const yesterdayIdx = (getDayOfWeekIndex() - 1 + 7) % 7;
-            hist[yesterdayIdx] = newBinary[g.id] ? 1 : 0;
-            newHistory[g.id] = hist;
-            newBinary[g.id] = false;
-          }
-        });
+  const counts = Object.fromEntries(
+    Object.values(goalProgress).map((row) => [row.goal_id, row.count_value]),
+  ) as Record<number, number>;
 
-        updated = { ...updated, binary: newBinary, history: newHistory, lastResetDate: today };
-        needsUpdate = true;
-      }
-
-      // Weekly reset
-      if (prev.lastWeekResetDate !== currentWeek) {
-        const weeklyGoals = prev.goals.filter(g => g.frequency === "weekly");
-        const newBinary = { ...updated.binary };
-        const newCounts = { ...updated.counts };
-        const newHistory = { ...updated.history };
-
-        weeklyGoals.forEach(g => {
-          if (g.type === "binary") newBinary[g.id] = false;
-          if (g.type === "count") newCounts[g.id] = 0;
-          newHistory[g.id] = new Array(7).fill(0);
-        });
-
-        // Also reset daily histories for new week
-        prev.goals.filter(g => g.frequency === "daily").forEach(g => {
-          newHistory[g.id] = new Array(7).fill(0);
-        });
-
-        updated = { ...updated, binary: newBinary, counts: newCounts, history: newHistory, lastWeekResetDate: currentWeek };
-        needsUpdate = true;
-      }
-
-      // Monthly reset
-      if (prev.lastMonthResetDate !== currentMonth) {
-        const monthlyGoals = prev.goals.filter(g => g.frequency === "monthly");
-        const newBinary = { ...updated.binary };
-
-        monthlyGoals.forEach(g => {
-          if (g.type === "binary") newBinary[g.id] = false;
-        });
-
-        updated = { ...updated, binary: newBinary, lastMonthResetDate: currentMonth };
-        needsUpdate = true;
-      }
-
-      return needsUpdate ? updated : prev;
+  const appendEvent = useCallback((goalId: number, eventType: GoalEventType, delta: number) => {
+    setState((prev) => {
+      const event: GoalEvent = {
+        id: Date.now() + Math.floor(Math.random() * 1000),
+        user_id: "local-user",
+        goal_id: goalId,
+        event_type: eventType,
+        delta,
+        effective_date: getToday(),
+        created_at: new Date().toISOString(),
+      };
+      const nextEvents = [...prev.events, event];
+      return {
+        ...prev,
+        events: nextEvents,
+        goal_progress: rebuildGoalProgress(prev.goals, nextEvents),
+      };
     });
   }, []);
-
-  const goals = state.goals;
-  const binary = state.binary;
-  const counts = state.counts;
-  const history = state.history;
-  const email = state.email;
-  const reminders = state.reminders;
 
   const isComplete = useCallback((g: Goal) => {
     if (g.type === "binary") return !!binary[g.id];
@@ -166,66 +129,75 @@ export function useGoalTracker() {
   }, [binary, counts]);
 
   const toggleBinary = useCallback((id: number) => {
-    setState(p => ({ ...p, binary: { ...p.binary, [id]: !p.binary[id] } }));
-  }, []);
+    appendEvent(id, binary[id] ? "uncompletion" : "completion", 0);
+  }, [appendEvent, binary]);
 
   const increment = useCallback((id: number, target: number) => {
-    setState(p => ({ ...p, counts: { ...p.counts, [id]: Math.min((p.counts[id] ?? 0) + 1, target) } }));
-  }, []);
+    if ((counts[id] ?? 0) >= target) return;
+    appendEvent(id, "count_increment", 1);
+  }, [appendEvent, counts]);
 
   const decrement = useCallback((id: number) => {
-    setState(p => ({ ...p, counts: { ...p.counts, [id]: Math.max((p.counts[id] ?? 0) - 1, 0) } }));
-  }, []);
+    if ((counts[id] ?? 0) <= 0) return;
+    appendEvent(id, "count_decrement", -1);
+  }, [appendEvent, counts]);
 
   const addGoal = useCallback((title: string, frequency: GoalFrequency, type: GoalType, target?: number, label?: string) => {
     const id = Date.now();
-    setState(p => ({
+    setState((p) => ({
       ...p,
       goals: [...p.goals, { id, title, frequency, type, target, label, streak: 0, createdAt: getToday() }],
-      ...(type === "count" ? { counts: { ...p.counts, [id]: 0 } } : {}),
-      history: { ...p.history, [id]: new Array(7).fill(0) },
+      goal_progress: {
+        ...p.goal_progress,
+        [id]: {
+          id,
+          user_id: "local-user",
+          goal_id: id,
+          binary_value: false,
+          count_value: 0,
+          updated_at: new Date().toISOString(),
+        },
+      },
     }));
   }, []);
 
   const deleteGoal = useCallback((id: number) => {
-    setState(p => {
-      const newGoals = p.goals.filter(g => g.id !== id);
-      const newBinary = { ...p.binary };
-      const newCounts = { ...p.counts };
-      const newHistory = { ...p.history };
-      const newReminders = ENABLE_REMINDERS ? p.reminders.filter(r => r.goalId !== id) : p.reminders;
-      delete newBinary[id];
-      delete newCounts[id];
-      delete newHistory[id];
-      return { ...p, goals: newGoals, binary: newBinary, counts: newCounts, history: newHistory, reminders: newReminders };
+    setState((p) => {
+      const newGoals = p.goals.filter((g) => g.id !== id);
+      const newProgress = { ...p.goal_progress };
+      delete newProgress[id];
+
+      return {
+        ...p,
+        goals: newGoals,
+        goal_progress: newProgress,
+        events: p.events.filter((e) => e.goal_id !== id),
+      };
     });
   }, []);
-
-  const setEmail = useCallback((nextEmail: string) => {
-    if (!ENABLE_REMINDERS) return;
-    setState(p => ({ ...p, email: nextEmail }));
-  }, []);
-
-  const setReminder = useCallback((goalId: number, time: ReminderTime) => {
-    if (!ENABLE_REMINDERS) return;
-    setState(p => {
-      const filtered = p.reminders.filter(r => r.goalId !== goalId);
-      if (time === "none") return { ...p, reminders: filtered };
-      return { ...p, reminders: [...filtered, { goalId, time }] };
-    });
-  }, []);
-
-  const getReminder = useCallback((goalId: number): ReminderTime => {
-    if (!ENABLE_REMINDERS) return "none";
-    return reminders.find(r => r.goalId === goalId)?.time ?? "none";
-  }, [reminders]);
 
   const completedCount = goals.filter(isComplete).length;
-  const todayIndex = getDayOfWeekIndex();
+  const dailyPercent = derivePeriodCompletionRate(goals, events, "daily");
+  const weeklyPercent = derivePeriodCompletionRate(goals, events, "weekly");
+  const monthlyPercent = derivePeriodCompletionRate(goals, events, "monthly");
 
   return {
-    goals, binary, counts, history, email, completedCount,
-    todayIndex, isComplete, toggleBinary, increment, decrement,
-    addGoal, deleteGoal, setEmail, setReminder, getReminder, reminderEnabled: ENABLE_REMINDERS,
+    goals,
+    binary,
+    counts,
+    history,
+    completedCount,
+    todayIndex,
+    dailyPercent,
+    weeklyPercent,
+    monthlyPercent,
+    events,
+    goalProgress,
+    isComplete,
+    toggleBinary,
+    increment,
+    decrement,
+    addGoal,
+    deleteGoal,
   };
 }

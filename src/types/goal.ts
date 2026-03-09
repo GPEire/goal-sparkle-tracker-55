@@ -1,6 +1,5 @@
 export type GoalFrequency = "daily" | "weekly" | "monthly";
 export type GoalType = "binary" | "count";
-export type ReminderTime = "none" | "morning" | "evening" | "weekly-digest";
 
 export interface Goal {
   id: number;
@@ -13,19 +12,28 @@ export interface Goal {
   createdAt: string;
 }
 
-export interface GoalReminder {
-  goalId: number;
-  time: ReminderTime;
+export type GoalEventType = "completion" | "uncompletion" | "count_increment" | "count_decrement";
+
+export interface GoalEvent {
+  id: number;
+  user_id: string;
+  goal_id: number;
+  event_type: GoalEventType;
+  delta: number;
+  effective_date: string;
+  created_at: string;
+}
+
+export interface GoalProgressRow {
+  id: number;
+  user_id: string;
+  goal_id: number;
+  binary_value: boolean;
+  count_value: number;
+  updated_at: string;
 }
 
 export type ViewTab = "today" | "progress";
 
 export const GROUP_ORDER: GoalFrequency[] = ["daily", "weekly", "monthly"];
 export const WEEK_LABELS = ["M", "T", "W", "T", "F", "S", "S"];
-
-export const REMINDER_OPTIONS: { value: ReminderTime; label: string }[] = [
-  { value: "none", label: "No reminder" },
-  { value: "morning", label: "Morning (9am)" },
-  { value: "evening", label: "Evening (6pm)" },
-  { value: "weekly-digest", label: "Weekly digest" },
-];
