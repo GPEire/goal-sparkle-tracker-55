@@ -1,73 +1,36 @@
-# Welcome to your Lovable project
+# Goal Sparkle Tracker (Supabase Auth + Sync)
 
-## Project info
-
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
-
-## How can I edit this code?
-
-There are several ways of editing your application.
-
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
+## Local setup
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
 npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+cp .env.example .env
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+Required env vars:
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
 
-**Use GitHub Codespaces**
+## Supabase setup (MVP / free tier)
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+1. Create a Supabase project (free tier).
+2. Open SQL Editor and run `supabase/schema.sql`.
+3. In **Authentication → Providers**:
+   - Enable **Google** provider.
+   - Add Google OAuth client ID/secret.
+   - Add redirect URL: `https://<project-ref>.supabase.co/auth/v1/callback` in Google Console.
+4. In **Authentication → URL Configuration**:
+   - Add your local URL (for dev): `http://localhost:5173`
+   - Add your production app URL.
+5. Fallback auth:
+   - Enable **Email** provider with magic link.
 
-## What technologies are used for this project?
+After this, users can sign in with Google, and if Google is blocked they can use the magic-link email flow.
 
-This project is built with:
+## Data model and security
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+- `goals` stores per-user goal definitions.
+- `goal_progress` stores per-user goal completion state and rolling history.
+- Row Level Security policies restrict read/write access to rows where `user_id = auth.uid()`.

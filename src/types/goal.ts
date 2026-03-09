@@ -3,7 +3,7 @@ export type GoalType = "binary" | "count";
 export type ReminderTime = "none" | "morning" | "evening" | "weekly-digest";
 
 export interface Goal {
-  id: number;
+  id: string;
   title: string;
   frequency: GoalFrequency;
   type: GoalType;
@@ -14,7 +14,7 @@ export interface Goal {
 }
 
 export interface GoalReminder {
-  goalId: number;
+  goalId: string;
   time: ReminderTime;
 }
 

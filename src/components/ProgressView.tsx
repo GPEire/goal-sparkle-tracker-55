@@ -3,8 +3,8 @@ import { WEEK_LABELS } from "@/types/goal";
 
 interface ProgressViewProps {
   goals: Goal[];
-  history: Record<number, number[]>;
-  counts: Record<number, number>;
+  history: Record<string, number[]>;
+  counts: Record<string, number>;
   todayIndex: number;
   completedCount: number;
 }
