@@ -27,6 +27,26 @@ interface GoalProgressRow {
   last_month_reset_date: string;
 }
 
+type GoalEventType =
+  | "goal_created"
+  | "goal_deleted"
+  | "binary_toggled"
+  | "count_incremented"
+  | "count_decremented"
+  | "goal_reset_daily"
+  | "goal_reset_weekly"
+  | "goal_reset_monthly";
+
+interface GoalEventInsert {
+  user_id: string;
+  goal_id: string;
+  event_type: GoalEventType;
+  event_date: string;
+  binary_done?: boolean | null;
+  count_value?: number | null;
+  delta?: number | null;
+}
+
 interface StoredState {
   goals: Goal[];
   binary: Record<string, boolean>;
@@ -153,6 +173,8 @@ export function useGoalTracker(userId?: string) {
       const next = { ...prev };
       const updates: GoalProgressRow[] = [];
 
+      const resetEvents: GoalEventInsert[] = [];
+
       for (const g of prev.goals) {
         const goalId = g.id;
         let binaryDone = prev.binary[goalId] ?? false;
@@ -171,6 +193,15 @@ export function useGoalTracker(userId?: string) {
           }
           if (g.type === "count") countValue = 0;
           lastResetDate = today;
+          resetEvents.push({
+            user_id: userId,
+            goal_id: goalId,
+            event_type: "goal_reset_daily",
+            event_date: today,
+            binary_done: binaryDone,
+            count_value: countValue,
+            delta: null,
+          });
           changed = true;
         }
 
@@ -179,6 +210,15 @@ export function useGoalTracker(userId?: string) {
           if (g.type === "count") countValue = 0;
           hist = new Array(7).fill(0);
           lastWeekResetDate = currentWeek;
+          resetEvents.push({
+            user_id: userId,
+            goal_id: goalId,
+            event_type: "goal_reset_weekly",
+            event_date: today,
+            binary_done: binaryDone,
+            count_value: countValue,
+            delta: null,
+          });
           changed = true;
         }
 
@@ -186,6 +226,15 @@ export function useGoalTracker(userId?: string) {
           if (g.type === "binary") binaryDone = false;
           if (g.type === "count") countValue = 0;
           lastMonthResetDate = currentMonth;
+          resetEvents.push({
+            user_id: userId,
+            goal_id: goalId,
+            event_type: "goal_reset_monthly",
+            event_date: today,
+            binary_done: binaryDone,
+            count_value: countValue,
+            delta: null,
+          });
           changed = true;
         }
 
@@ -214,6 +263,12 @@ export function useGoalTracker(userId?: string) {
         supabase.from("goal_progress").upsert(updates).then(({ error }) => {
           if (error) console.error("Failed to persist reset updates", error);
         });
+
+        if (resetEvents.length > 0) {
+          supabase.from("goal_events").insert(resetEvents).then(({ error }) => {
+            if (error) console.error("Failed to persist goal reset events", error);
+          });
+        }
       }
 
       return updates.length > 0 ? next : prev;
@@ -249,23 +304,66 @@ export function useGoalTracker(userId?: string) {
     if (error) console.error("Failed to sync goal progress", error);
   }, [state.lastMonthResetDateByGoal, state.lastResetDateByGoal, state.lastWeekResetDateByGoal, userId]);
 
+  const persistGoalEvent = useCallback(async (event: Omit<GoalEventInsert, "user_id" | "event_date"> & { event_date?: string }) => {
+    if (!userId) return;
+    const payload: GoalEventInsert = {
+      user_id: userId,
+      goal_id: event.goal_id,
+      event_type: event.event_type,
+      event_date: event.event_date ?? getToday(),
+      binary_done: event.binary_done ?? null,
+      count_value: event.count_value ?? null,
+      delta: event.delta ?? null,
+    };
+
+    const { error } = await supabase.from("goal_events").insert(payload);
+    if (error) console.error("Failed to persist goal event", error);
+  }, [userId]);
+
   const toggleBinary = useCallback((id: string) => {
     const nextValue = !binary[id];
     setState((p) => ({ ...p, binary: { ...p.binary, [id]: nextValue } }));
     void persistProgress(id, nextValue, counts[id] ?? 0, history[id] ?? new Array(7).fill(0));
-  }, [binary, counts, history, persistProgress]);
+    void persistGoalEvent({
+      goal_id: id,
+      event_type: "binary_toggled",
+      binary_done: nextValue,
+      count_value: counts[id] ?? 0,
+      delta: null,
+    });
+  }, [binary, counts, history, persistGoalEvent, persistProgress]);
 
   const increment = useCallback((id: string, target: number) => {
+    const current = counts[id] ?? 0;
     const nextCount = Math.min((counts[id] ?? 0) + 1, target);
     setState((p) => ({ ...p, counts: { ...p.counts, [id]: nextCount } }));
     void persistProgress(id, binary[id] ?? false, nextCount, history[id] ?? new Array(7).fill(0));
-  }, [binary, counts, history, persistProgress]);
+    if (nextCount !== current) {
+      void persistGoalEvent({
+        goal_id: id,
+        event_type: "count_incremented",
+        binary_done: binary[id] ?? false,
+        count_value: nextCount,
+        delta: nextCount - current,
+      });
+    }
+  }, [binary, counts, history, persistGoalEvent, persistProgress]);
 
   const decrement = useCallback((id: string) => {
+    const current = counts[id] ?? 0;
     const nextCount = Math.max((counts[id] ?? 0) - 1, 0);
     setState((p) => ({ ...p, counts: { ...p.counts, [id]: nextCount } }));
     void persistProgress(id, binary[id] ?? false, nextCount, history[id] ?? new Array(7).fill(0));
-  }, [binary, counts, history, persistProgress]);
+    if (nextCount !== current) {
+      void persistGoalEvent({
+        goal_id: id,
+        event_type: "count_decremented",
+        binary_done: binary[id] ?? false,
+        count_value: nextCount,
+        delta: nextCount - current,
+      });
+    }
+  }, [binary, counts, history, persistGoalEvent, persistProgress]);
 
   const addGoal = useCallback(async (title: string, frequency: GoalFrequency, type: GoalType, target?: number, label?: string) => {
     if (!userId) return;
@@ -314,6 +412,15 @@ export function useGoalTracker(userId?: string) {
       last_month_reset_date: month,
     });
 
+    void persistGoalEvent({
+      goal_id: realId,
+      event_type: "goal_created",
+      binary_done: false,
+      count_value: 0,
+      delta: null,
+      event_date: today,
+    });
+
     setState((p) => {
       const goals = p.goals.map((g) => g.id === tempId ? { ...g, id: realId, createdAt: data.created_at as string } : g);
       const { [tempId]: tempBinary, ...restBinary } = p.binary;
@@ -333,10 +440,12 @@ export function useGoalTracker(userId?: string) {
         lastMonthResetDateByGoal: { ...restMonthly, [realId]: tempMonthly ?? month },
       };
     });
-  }, [userId]);
+  }, [persistGoalEvent, userId]);
 
   const deleteGoal = useCallback(async (id: string) => {
     const snapshot = state;
+    const deletedBinary = state.binary[id] ?? false;
+    const deletedCount = state.counts[id] ?? 0;
     setState((p) => {
       const newGoals = p.goals.filter((g) => g.id !== id);
       const newBinary = { ...p.binary };
@@ -353,8 +462,17 @@ export function useGoalTracker(userId?: string) {
     if (error) {
       console.error("Failed to delete goal", error);
       setState(snapshot);
+      return;
     }
-  }, [state]);
+
+    void persistGoalEvent({
+      goal_id: id,
+      event_type: "goal_deleted",
+      binary_done: deletedBinary,
+      count_value: deletedCount,
+      delta: null,
+    });
+  }, [persistGoalEvent, state]);
 
   const setEmail = useCallback((nextEmail: string) => {
     if (!ENABLE_REMINDERS) return;
