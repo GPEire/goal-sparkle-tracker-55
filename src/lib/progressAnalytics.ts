@@ -125,7 +125,8 @@ export function derivePeriodCompletionRate(goals: Goal[], events: GoalEvent[], p
       .sort((a, b) => a.created_at.localeCompare(b.created_at));
 
     if (goal.type === "binary") {
-      const last = scoped.at(-1);
+      const binaryEvents = scoped.filter((e) => e.event_type === "completion" || e.event_type === "uncompletion");
+      const last = binaryEvents.at(-1);
       return last?.event_type === "completion";
     }
 

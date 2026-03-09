@@ -28,6 +28,11 @@ interface StoredState {
   email: string;
 }
 
+interface LegacyStoredState extends Partial<StoredState> {
+  binary?: Record<number, boolean>;
+  counts?: Record<number, number>;
+}
+
 const DEFAULT_GOALS: Goal[] = [
   { id: 1, title: "Morning meditation", frequency: "daily", type: "binary", streak: 12, createdAt: getToday() },
   { id: 2, title: "Read 20 pages", frequency: "daily", type: "binary", streak: 4, createdAt: getToday() },
@@ -41,12 +46,29 @@ function loadState(): StoredState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as Partial<StoredState>;
+      const parsed = JSON.parse(raw) as LegacyStoredState;
       if (parsed.goals) {
+        const events = parsed.events ?? [];
+        const goalProgress = Object.keys(parsed.goal_progress ?? {}).length
+          ? (parsed.goal_progress as Record<number, GoalProgressRow>)
+          : Object.fromEntries(
+            parsed.goals.map((goal) => [
+              goal.id,
+              {
+                id: goal.id,
+                user_id: "local-user",
+                goal_id: goal.id,
+                binary_value: parsed.binary?.[goal.id] ?? false,
+                count_value: parsed.counts?.[goal.id] ?? 0,
+                updated_at: new Date().toISOString(),
+              },
+            ]),
+          ) as Record<number, GoalProgressRow>;
+
         return {
           goals: parsed.goals,
-          events: parsed.events ?? [],
-          goal_progress: parsed.goal_progress ?? {},
+          events,
+          goal_progress: goalProgress,
           reminders: parsed.reminders ?? [],
           email: parsed.email ?? "",
         };
