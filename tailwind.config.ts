@@ -13,12 +13,19 @@ export default {
       },
     },
     extend: {
+      fontFamily: {
+        mono: ["'DM Mono'", "'Courier New'", "monospace"],
+        display: ["'Playfair Display'", "serif"],
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
+        "text-subtle": "hsl(var(--text-subtle))",
+        "text-muted-strong": "hsl(var(--text-muted-strong))",
+        "surface-inset": "hsl(var(--surface-inset))",
         primary: {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",
