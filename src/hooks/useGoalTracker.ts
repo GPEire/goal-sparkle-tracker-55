@@ -1,6 +1,8 @@
 import { useState, useCallback, useEffect } from "react";
 import type { Goal, GoalFrequency, GoalType, GoalReminder, ReminderTime } from "@/types/goal";
 
+const ENABLE_REMINDERS = false;
+
 const STORAGE_KEY = "goal-tracker";
 
 interface StoredState {
@@ -191,7 +193,7 @@ export function useGoalTracker() {
       const newBinary = { ...p.binary };
       const newCounts = { ...p.counts };
       const newHistory = { ...p.history };
-      const newReminders = p.reminders.filter(r => r.goalId !== id);
+      const newReminders = ENABLE_REMINDERS ? p.reminders.filter(r => r.goalId !== id) : p.reminders;
       delete newBinary[id];
       delete newCounts[id];
       delete newHistory[id];
@@ -199,11 +201,13 @@ export function useGoalTracker() {
     });
   }, []);
 
-  const setEmail = useCallback((email: string) => {
-    setState(p => ({ ...p, email }));
+  const setEmail = useCallback((nextEmail: string) => {
+    if (!ENABLE_REMINDERS) return;
+    setState(p => ({ ...p, email: nextEmail }));
   }, []);
 
   const setReminder = useCallback((goalId: number, time: ReminderTime) => {
+    if (!ENABLE_REMINDERS) return;
     setState(p => {
       const filtered = p.reminders.filter(r => r.goalId !== goalId);
       if (time === "none") return { ...p, reminders: filtered };
@@ -212,6 +216,7 @@ export function useGoalTracker() {
   }, []);
 
   const getReminder = useCallback((goalId: number): ReminderTime => {
+    if (!ENABLE_REMINDERS) return "none";
     return reminders.find(r => r.goalId === goalId)?.time ?? "none";
   }, [reminders]);
 
@@ -221,6 +226,6 @@ export function useGoalTracker() {
   return {
     goals, binary, counts, history, email, completedCount,
     todayIndex, isComplete, toggleBinary, increment, decrement,
-    addGoal, deleteGoal, setEmail, setReminder, getReminder,
+    addGoal, deleteGoal, setEmail, setReminder, getReminder, reminderEnabled: ENABLE_REMINDERS,
   };
 }

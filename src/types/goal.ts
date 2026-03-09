@@ -18,7 +18,7 @@ export interface GoalReminder {
   time: ReminderTime;
 }
 
-export type ViewTab = "today" | "progress" | "reminders";
+export type ViewTab = "today" | "progress";
 
 export const GROUP_ORDER: GoalFrequency[] = ["daily", "weekly", "monthly"];
 export const WEEK_LABELS = ["M", "T", "W", "T", "F", "S", "S"];
