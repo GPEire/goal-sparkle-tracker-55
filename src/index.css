@@ -196,7 +196,7 @@
     background: hsl(var(--border));
   }
   .progress-bar-fill {
-    @apply h-[2px] rounded-sm transition-all duration-400;
+    @apply h-[2px] rounded-sm transition-all duration-[400ms];
     background: hsl(var(--foreground));
   }
 
