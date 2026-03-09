@@ -59,6 +59,8 @@ interface StoredState {
   lastMonthResetDateByGoal: Record<string, string>;
 }
 
+const STORAGE_KEY = "goal-tracker-state";
+
 function getToday() {
   return new Date().toISOString().split("T")[0];
 }
@@ -92,6 +94,39 @@ const EMPTY_STATE: StoredState = {
   lastMonthResetDateByGoal: {},
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function normalizeState(input: unknown): StoredState {
+  if (!isRecord(input)) return EMPTY_STATE;
+
+  return {
+    goals: Array.isArray(input.goals) ? (input.goals as Goal[]) : [],
+    binary: isRecord(input.binary) ? (input.binary as Record<string, boolean>) : {},
+    counts: isRecord(input.counts) ? (input.counts as Record<string, number>) : {},
+    history: isRecord(input.history) ? (input.history as Record<string, number[]>) : {},
+    reminders: Array.isArray(input.reminders) ? (input.reminders as GoalReminder[]) : [],
+    email: typeof input.email === "string" ? input.email : "",
+    lastResetDateByGoal: isRecord(input.lastResetDateByGoal) ? (input.lastResetDateByGoal as Record<string, string>) : {},
+    lastWeekResetDateByGoal: isRecord(input.lastWeekResetDateByGoal) ? (input.lastWeekResetDateByGoal as Record<string, string>) : {},
+    lastMonthResetDateByGoal: isRecord(input.lastMonthResetDateByGoal) ? (input.lastMonthResetDateByGoal as Record<string, string>) : {},
+  };
+}
+
+function loadState(): StoredState {
+  if (typeof window === "undefined") return EMPTY_STATE;
+
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return EMPTY_STATE;
+    return normalizeState(JSON.parse(raw));
+  } catch (error) {
+    console.error("Failed to parse stored goal tracker state", error);
+    return EMPTY_STATE;
+  }
+}
+
 function toGoal(row: GoalRow): Goal {
   return {
     id: row.id,
@@ -106,12 +141,12 @@ function toGoal(row: GoalRow): Goal {
 }
 
 export function useGoalTracker(userId?: string) {
-  const [state, setState] = useState<StoredState>(EMPTY_STATE);
+  const [state, setState] = useState<StoredState>(() => loadState());
   const [isLoading, setIsLoading] = useState(true);
 
   const loadFromSupabase = useCallback(async () => {
     if (!userId) {
-      setState(EMPTY_STATE);
+      setState(loadState());
       setIsLoading(false);
       return;
     }
@@ -161,6 +196,11 @@ export function useGoalTracker(userId?: string) {
   useEffect(() => {
     loadFromSupabase();
   }, [loadFromSupabase]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || userId) return;
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }, [state, userId]);
 
   useEffect(() => {
     if (!userId || state.goals.length === 0) return;

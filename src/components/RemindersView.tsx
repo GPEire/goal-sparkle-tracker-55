@@ -15,6 +15,10 @@ export function RemindersView({ goals, email, setEmail, getReminder, setReminder
     toast.success("Reminder preferences saved");
   };
 
+  if (goals.length === 0) {
+    return <div className="text-sm text-muted-foreground py-6">Add goals before configuring reminders.</div>;
+  }
+
   return (
     <div className="slide-in">
       <div className="label-uppercase tracking-[0.16em] mb-6">Email reminders</div>

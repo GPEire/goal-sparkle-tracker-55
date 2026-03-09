@@ -15,6 +15,10 @@ export function TodayView({
   goals, isComplete, counts,
   toggleBinary, increment, decrement,
 }: TodayViewProps) {
+  if (goals.length === 0) {
+    return <div className="text-sm text-muted-foreground py-6">No goals yet. Add one to get started.</div>;
+  }
+
   return (
     <div className="slide-in">
       {GROUP_ORDER.map(freq => {

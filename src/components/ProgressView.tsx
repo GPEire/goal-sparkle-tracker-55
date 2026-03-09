@@ -11,7 +11,11 @@ interface ProgressViewProps {
 
 export function ProgressView({ goals, history, counts, todayIndex, completedCount }: ProgressViewProps) {
   const totalGoals = goals.length;
-  const weekPercent = totalGoals > 0 ? Math.round((completedCount / totalGoals) * 100) : 0;
+  if (totalGoals === 0) {
+    return <div className="text-sm text-muted-foreground py-6">Progress will appear after you create your first goal.</div>;
+  }
+
+  const weekPercent = Math.round((completedCount / totalGoals) * 100);
   const bestStreak = goals.reduce((max, g) => Math.max(max, g.streak), 0);
 
   // Find first count goal for summary
