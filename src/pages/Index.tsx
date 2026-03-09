@@ -4,10 +4,9 @@ import { useGoalTracker } from "@/hooks/useGoalTracker";
 import { AddGoalForm } from "@/components/AddGoalForm";
 import { TodayView } from "@/components/TodayView";
 import { ProgressView } from "@/components/ProgressView";
-import { RemindersView } from "@/components/RemindersView";
 import type { ViewTab } from "@/types/goal";
 
-const TABS: ViewTab[] = ["today", "progress", "reminders"];
+const TABS: ViewTab[] = ["today", "progress"];
 
 const Index = () => {
   const [view, setView] = useState<ViewTab>("today");
@@ -73,16 +72,10 @@ const Index = () => {
           <TodayView
             goals={tracker.goals}
             isComplete={tracker.isComplete}
-            binary={tracker.binary}
             counts={tracker.counts}
             toggleBinary={tracker.toggleBinary}
             increment={tracker.increment}
             decrement={tracker.decrement}
-            deleteGoal={tracker.deleteGoal}
-            email={tracker.email}
-            setEmail={tracker.setEmail}
-            getReminder={tracker.getReminder}
-            setReminder={tracker.setReminder}
           />
         )}
 
@@ -93,16 +86,6 @@ const Index = () => {
             counts={tracker.counts}
             todayIndex={tracker.todayIndex}
             completedCount={tracker.completedCount}
-          />
-        )}
-
-        {view === "reminders" && (
-          <RemindersView
-            goals={tracker.goals}
-            email={tracker.email}
-            setEmail={tracker.setEmail}
-            getReminder={tracker.getReminder}
-            setReminder={tracker.setReminder}
           />
         )}
 
