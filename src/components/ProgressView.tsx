@@ -11,6 +11,8 @@ interface ProgressViewProps {
 
 export function ProgressView({ goals, history, counts, todayIndex, completedCount }: ProgressViewProps) {
   const totalGoals = goals.length;
+  const leftColumnClass = "w-[176px]";
+
   if (totalGoals === 0) {
     return <div className="text-sm text-muted-foreground py-6">Progress will appear after you create your first goal.</div>;
   }
@@ -32,28 +34,27 @@ export function ProgressView({ goals, history, counts, todayIndex, completedCoun
       <div className="label-uppercase tracking-[0.16em] mb-5">This week</div>
 
       {/* Week header */}
-      <div className="flex gap-0 mb-1" style={{ paddingLeft: 180 }}>
-        {WEEK_LABELS.map((d, i) => (
-          <div
-            key={i}
-            className="w-7 text-center text-[9px] tracking-[0.1em]"
-            style={{
-              color: i === todayIndex ? "hsl(var(--foreground))" : "hsl(var(--muted-foreground))",
-              fontWeight: i === todayIndex ? 500 : 300,
-            }}
-          >{d}</div>
-        ))}
+      <div className="flex items-center mb-1">
+        <div className={leftColumnClass} />
+        <div className="flex gap-0">
+          {WEEK_LABELS.map((d, i) => (
+            <div
+              key={i}
+              className="w-7 text-center text-[9px] tracking-[0.1em]"
+              style={{
+                color: i === todayIndex ? "hsl(var(--foreground))" : "hsl(var(--muted-foreground))",
+                fontWeight: i === todayIndex ? 500 : 300,
+              }}
+            >{d}</div>
+          ))}
+        </div>
       </div>
 
       {/* Goal rows */}
       {goals.map((g, gi) => (
-        <div
-          key={g.id}
-          className="flex items-center py-3"
-          style={{ borderBottom: gi < goals.length - 1 ? "1px solid hsl(var(--border) / 0.6)" : "none" }}
-        >
-          <div className="flex-1 min-w-0">
-            <div className="text-xs text-foreground tracking-tight whitespace-nowrap overflow-hidden text-ellipsis" style={{ maxWidth: 168 }}>
+        <div key={g.id} className="flex items-center py-3" style={{ borderBottom: gi < goals.length - 1 ? "1px solid hsl(var(--border) / 0.6)" : "none" }}>
+          <div className={`${leftColumnClass} min-w-0 pr-2`}>
+            <div className="text-xs text-foreground tracking-tight whitespace-nowrap overflow-hidden text-ellipsis">
               {g.title}
             </div>
             <div className="flex gap-1.5 items-center mt-0.5">
