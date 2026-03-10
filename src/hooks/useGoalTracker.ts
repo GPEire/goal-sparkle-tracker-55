@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Goal, GoalFrequency, GoalType, GoalReminder, ReminderTime } from "@/types/goal";
+import { getDayOfWeekIndex, getLocalDateKey, getMonthId, getWeekId } from "@/hooks/goalDateUtils";
 
 const ENABLE_REMINDERS = false;
 
@@ -60,27 +61,7 @@ interface StoredState {
 }
 
 const STORAGE_KEY = "goal-tracker-state";
-
-function getToday() {
-  return new Date().toISOString().split("T")[0];
-}
-
-function getWeekId(date: Date) {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
-  const week1 = new Date(d.getFullYear(), 0, 4);
-  return `${d.getFullYear()}-W${Math.ceil(((d.getTime() - week1.getTime()) / 86400000 + week1.getDay() + 1) / 7)}`;
-}
-
-function getMonthId(date: Date) {
-  return `${date.getFullYear()}-${date.getMonth()}`;
-}
-
-function getDayOfWeekIndex() {
-  const day = new Date().getDay();
-  return day === 0 ? 6 : day - 1;
-}
+const ROLLOVER_INTERVAL_MS = 15 * 60 * 1000;
 
 const EMPTY_STATE: StoredState = {
   goals: [],
@@ -202,14 +183,19 @@ export function useGoalTracker(userId?: string) {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state, userId]);
 
-  useEffect(() => {
-    if (!userId || state.goals.length === 0) return;
+  // Client-side rollover keeps UX responsive; if backend scheduling/on-read hooks are added,
+  // move rollover authority server-side to avoid device clock drift.
+  const runRolloverCheck = useCallback(() => {
+    if (!userId) return;
 
-    const today = getToday();
-    const currentWeek = getWeekId(new Date());
-    const currentMonth = getMonthId(new Date());
+    const now = new Date();
+    const today = getLocalDateKey(now);
+    const currentWeek = getWeekId(now);
+    const currentMonth = getMonthId(now);
 
     setState((prev) => {
+      if (prev.goals.length === 0) return prev;
+
       const next = { ...prev };
       const updates: GoalProgressRow[] = [];
 
@@ -227,7 +213,7 @@ export function useGoalTracker(userId?: string) {
 
         if (lastResetDate !== today && g.frequency === "daily") {
           if (g.type === "binary") {
-            const yesterdayIdx = (getDayOfWeekIndex() - 1 + 7) % 7;
+            const yesterdayIdx = (getDayOfWeekIndex(now) - 1 + 7) % 7;
             hist[yesterdayIdx] = binaryDone ? 1 : 0;
             binaryDone = false;
           }
@@ -313,7 +299,34 @@ export function useGoalTracker(userId?: string) {
 
       return updates.length > 0 ? next : prev;
     });
-  }, [state.goals, userId]);
+  }, [userId]);
+
+  useEffect(() => {
+    runRolloverCheck();
+  }, [runRolloverCheck, state.goals]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        runRolloverCheck();
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [runRolloverCheck]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const intervalId = window.setInterval(() => {
+      runRolloverCheck();
+    }, ROLLOVER_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [runRolloverCheck]);
 
   const goals = state.goals;
   const binary = state.binary;
@@ -336,7 +349,7 @@ export function useGoalTracker(userId?: string) {
       binary_done: nextBinary,
       count_value: nextCount,
       history: nextHistory,
-      last_reset_date: state.lastResetDateByGoal[goalId] ?? getToday(),
+      last_reset_date: state.lastResetDateByGoal[goalId] ?? getLocalDateKey(),
       last_week_reset_date: state.lastWeekResetDateByGoal[goalId] ?? getWeekId(new Date()),
       last_month_reset_date: state.lastMonthResetDateByGoal[goalId] ?? getMonthId(new Date()),
     };
@@ -350,7 +363,7 @@ export function useGoalTracker(userId?: string) {
       user_id: userId,
       goal_id: event.goal_id,
       event_type: event.event_type,
-      event_date: event.event_date ?? getToday(),
+      event_date: event.event_date ?? getLocalDateKey(),
       binary_done: event.binary_done ?? null,
       count_value: event.count_value ?? null,
       delta: event.delta ?? null,
@@ -409,9 +422,10 @@ export function useGoalTracker(userId?: string) {
     if (!userId) return;
 
     const tempId = `tmp-${Date.now()}`;
-    const today = getToday();
-    const week = getWeekId(new Date());
-    const month = getMonthId(new Date());
+    const now = new Date();
+    const today = getLocalDateKey(now);
+    const week = getWeekId(now);
+    const month = getMonthId(now);
 
     setState((p) => ({
       ...p,
