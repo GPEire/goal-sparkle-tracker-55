@@ -6,6 +6,7 @@ import { useGoalTracker } from "@/hooks/useGoalTracker";
 import { AddGoalForm } from "@/components/AddGoalForm";
 import { TodayView } from "@/components/TodayView";
 import { ProgressView } from "@/components/ProgressView";
+import { VoiceInput } from "@/components/VoiceInput";
 import type { ViewTab } from "@/types/goal";
 
 const TABS: ViewTab[] = ["today", "progress"];
@@ -34,12 +35,13 @@ const Index = () => {
   const { goals, completedCount } = tracker;
 
   const handleGoogleSignIn = async () => {
-    await supabase.auth.signInWithOAuth({
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
         redirectTo: window.location.origin,
       },
     });
+    if (error) window.alert(`Google sign-in failed: ${error.message}`);
   };
 
   const handleMagicLinkSignIn = async () => {
@@ -142,14 +144,23 @@ const Index = () => {
         ) : (
           <>
             {view === "today" && (
-              <TodayView
-                goals={tracker.goals}
-                isComplete={tracker.isComplete}
-                counts={tracker.counts}
-                toggleBinary={tracker.toggleBinary}
-                increment={tracker.increment}
-                decrement={tracker.decrement}
-              />
+              <>
+                <VoiceInput
+                  goals={tracker.goals}
+                  counts={tracker.counts}
+                  binary={tracker.binary}
+                  onToggleBinary={tracker.toggleBinary}
+                  onIncrement={tracker.increment}
+                />
+                <TodayView
+                  goals={tracker.goals}
+                  isComplete={tracker.isComplete}
+                  counts={tracker.counts}
+                  toggleBinary={tracker.toggleBinary}
+                  increment={tracker.increment}
+                  decrement={tracker.decrement}
+                />
+              </>
             )}
 
             {view === "progress" && (
